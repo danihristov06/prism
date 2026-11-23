@@ -1,0 +1,412 @@
+[
+  {
+    "target": "silesia.tar",
+    "is_directory": false,
+    "orig_bytes": 211957760,
+    "orig_mib": 202.138671875,
+    "7z": {
+      "size": 48682315,
+      "ratio_pct": 22.96793238426373,
+      "enc_seconds": 74.68969379999908,
+      "enc_mib_s": 2.706379710382512,
+      "dec_seconds": 1.8782087999861687,
+      "dec_mib_s": 107.62310978230353,
+      "peak_ram_bytes": 2192228352,
+      "verified": true
+    },
+    "prism_v1": {
+      "size": 45104253,
+      "ratio_pct": 21.279830943674817,
+      "enc_seconds": 6.984914100001333,
+      "enc_mib_s": 28.939321082697553,
+      "dec_seconds": 1.3392553000012413,
+      "dec_mib_s": 150.9336359354431,
+      "peak_ram_bytes": 1168678912,
+      "verified": true
+    },
+    "prism": {
+      "size": 45109035,
+      "ratio_pct": 21.282087053571427,
+      "enc_seconds": 8.896016499988036,
+      "enc_mib_s": 22.722380503146756,
+      "dec_seconds": 1.7568725000019185,
+      "dec_mib_s": 115.05597126415222,
+      "peak_ram_bytes": 1053249536,
+      "verified": true
+    },
+    "prism_wins": {
+      "size": true,
+      "enc_speed": true,
+      "dec_speed": true
+    }
+  },
+  {
+    "target": "silesia_dir",
+    "is_directory": true,
+    "orig_bytes": 211938580,
+    "orig_mib": 202.12038040161133,
+    "7z": {
+      "size": 48688182,
+      "ratio_pct": 22.972779189140553,
+      "enc_seconds": 125.67101610000827,
+      "enc_mib_s": 1.608329324247407,
+      "dec_seconds": 5.019294199999422,
+      "dec_mib_s": 40.268685665334104,
+      "peak_ram_bytes": 2192019456,
+      "verified": true
+    },
+    "prism_v1": {
+      "size": 45112073,
+      "ratio_pct": 21.285446472275126,
+      "enc_seconds": 20.810529099981068,
+      "enc_mib_s": 9.712409493797791,
+      "dec_seconds": 3.0538922999985516,
+      "dec_mib_s": 66.18451488996753,
+      "peak_ram_bytes": 1315143680,
+      "verified": true
+    },
+    "prism": {
+      "size": 45104013,
+      "ratio_pct": 21.281643483692303,
+      "enc_seconds": 10.613690000027418,
+      "enc_mib_s": 19.043365728704078,
+      "dec_seconds": 1.7399239999940619,
+      "dec_mib_s": 116.16621208874706,
+      "peak_ram_bytes": 1247371264,
+      "verified": true
+    },
+    "prism_wins": {
+      "size": true,
+      "enc_speed": true,
+      "dec_speed": true
+    }
+  },
+  {
+    "target": "mozilla",
+    "is_directory": false,
+    "orig_bytes": 51220480,
+    "orig_mib": 48.84765625,
+    "7z": {
+      "size": 13344686,
+      "ratio_pct": 26.053418476359457,
+      "enc_seconds": 27.14206370001193,
+      "enc_mib_s": 1.7997031025307972,
+      "dec_seconds": 0.7072929999849293,
+      "dec_mib_s": 69.062830045032,
+      "peak_ram_bytes": 544235520,
+      "verified": true
+    },
+    "prism_v1": {
+      "size": 12573496,
+      "ratio_pct": 24.54779025889644,
+      "enc_seconds": 4.254727699997602,
+      "enc_mib_s": 11.480794940185604,
+      "dec_seconds": 0.4391973000019789,
+      "dec_mib_s": 111.22030178641788,
+      "peak_ram_bytes": 712814592,
+      "verified": true
+    },
+    "prism": {
+      "size": 12573840,
+      "ratio_pct": 24.5484618652539,
+      "enc_seconds": 4.698315699992236,
+      "enc_mib_s": 10.396844181858771,
+      "dec_seconds": 0.4423590000078548,
+      "dec_mib_s": 110.42537000294475,
+      "peak_ram_bytes": 634077184,
+      "verified": true
+    },
+    "prism_wins": {
+      "size": true,
+      "enc_speed": true,
+      "dec_speed": true
+    }
+  },
+  {
+    "target": "ooffice",
+    "is_directory": false,
+    "orig_bytes": 6152192,
+    "orig_mib": 5.8671875,
+    "7z": {
+      "size": 2425568,
+      "ratio_pct": 39.426077729693745,
+      "enc_seconds": 1.343987100000959,
+      "enc_mib_s": 4.36550879096668,
+      "dec_seconds": 0.1400329000025522,
+      "dec_mib_s": 41.89863596264211,
+      "peak_ram_bytes": 88276992,
+      "verified": true
+    },
+    "prism_v1": {
+      "size": 2172313,
+      "ratio_pct": 35.30957746442244,
+      "enc_seconds": 0.7037689000135288,
+      "enc_mib_s": 8.336809853187905,
+      "dec_seconds": 0.10768779998761602,
+      "dec_mib_s": 54.48330730755685,
+      "peak_ram_bytes": 96186368,
+      "verified": true
+    },
+    "prism": {
+      "size": 2172313,
+      "ratio_pct": 35.30957746442244,
+      "enc_seconds": 0.7539895000227261,
+      "enc_mib_s": 7.781524145658734,
+      "dec_seconds": 0.126224599982379,
+      "dec_mib_s": 46.482123934788156,
+      "peak_ram_bytes": 95465472,
+      "verified": true
+    },
+    "prism_wins": {
+      "size": true,
+      "enc_speed": true,
+      "dec_speed": true
+    }
+  },
+  {
+    "target": "osdb",
+    "is_directory": false,
+    "orig_bytes": 10085684,
+    "orig_mib": 9.618457794189453,
+    "7z": {
+      "size": 2851796,
+      "ratio_pct": 28.275682640860055,
+      "enc_seconds": 2.533760899998015,
+      "enc_mib_s": 3.796118960631601,
+      "dec_seconds": 0.15055640001082793,
+      "dec_mib_s": 63.88607720095392,
+      "peak_ram_bytes": 140455936,
+      "verified": true
+    },
+    "prism_v1": {
+      "size": 2698266,
+      "ratio_pct": 26.75342594513173,
+      "enc_seconds": 0.20865270000649616,
+      "enc_mib_s": 46.09793112617279,
+      "dec_seconds": 0.1233487999998033,
+      "dec_mib_s": 77.97771680149941,
+      "peak_ram_bytes": 69648384,
+      "verified": true
+    },
+    "prism": {
+      "size": 2698266,
+      "ratio_pct": 26.75342594513173,
+      "enc_seconds": 0.24401390002458356,
+      "enc_mib_s": 39.417663474172684,
+      "dec_seconds": 0.14718749999883585,
+      "dec_mib_s": 65.34833320944733,
+      "peak_ram_bytes": 70098944,
+      "verified": true
+    },
+    "prism_wins": {
+      "size": true,
+      "enc_speed": true,
+      "dec_speed": true
+    }
+  },
+  {
+    "target": "dickens",
+    "is_directory": false,
+    "orig_bytes": 10192446,
+    "orig_mib": 9.720273971557617,
+    "7z": {
+      "size": 2831111,
+      "ratio_pct": 27.776561190513053,
+      "enc_seconds": 5.9721730000164825,
+      "enc_mib_s": 1.6275941724278231,
+      "dec_seconds": 0.15359349999926053,
+      "dec_mib_s": 63.28571177559216,
+      "peak_ram_bytes": 141451264,
+      "verified": true
+    },
+    "prism_v1": {
+      "size": 2631554,
+      "ratio_pct": 25.818670022877726,
+      "enc_seconds": 0.17495919999782927,
+      "enc_mib_s": 55.55737550056366,
+      "dec_seconds": 0.10427989999880083,
+      "dec_mib_s": 93.21330353854766,
+      "peak_ram_bytes": 70197248,
+      "verified": true
+    },
+    "prism": {
+      "size": 2631554,
+      "ratio_pct": 25.818670022877726,
+      "enc_seconds": 0.21586450000177138,
+      "enc_mib_s": 45.029516069005574,
+      "dec_seconds": 0.13407510000979528,
+      "dec_mib_s": 72.49872624258697,
+      "peak_ram_bytes": 70221824,
+      "verified": true
+    },
+    "prism_wins": {
+      "size": true,
+      "enc_speed": true,
+      "dec_speed": true
+    }
+  },
+  {
+    "target": "xml",
+    "is_directory": false,
+    "orig_bytes": 5345280,
+    "orig_mib": 5.09765625,
+    "7z": {
+      "size": 455003,
+      "ratio_pct": 8.512238835009578,
+      "enc_seconds": 1.3066469999903347,
+      "enc_mib_s": 3.9013262572352803,
+      "dec_seconds": 0.12419349999981932,
+      "dec_mib_s": 41.04607930372698,
+      "peak_ram_bytes": 81035264,
+      "verified": true
+    },
+    "prism_v1": {
+      "size": 445146,
+      "ratio_pct": 8.327833153735632,
+      "enc_seconds": 0.09014359998400323,
+      "enc_mib_s": 56.55039571200422,
+      "dec_seconds": 0.05997229999047704,
+      "dec_mib_s": 85.00017926291727,
+      "peak_ram_bytes": 36102144,
+      "verified": true
+    },
+    "prism": {
+      "size": 445146,
+      "ratio_pct": 8.327833153735632,
+      "enc_seconds": 0.0860333000018727,
+      "enc_mib_s": 59.25212969732694,
+      "dec_seconds": 0.07095960000879131,
+      "dec_mib_s": 71.83885266219711,
+      "peak_ram_bytes": 35971072,
+      "verified": true
+    },
+    "prism_wins": {
+      "size": true,
+      "enc_speed": true,
+      "dec_speed": true
+    }
+  },
+  {
+    "target": "mr",
+    "is_directory": false,
+    "orig_bytes": 9970564,
+    "orig_mib": 9.508670806884766,
+    "7z": {
+      "size": 2748257,
+      "ratio_pct": 27.5637065265315,
+      "enc_seconds": 8.35455920000095,
+      "enc_mib_s": 1.1381415319773764,
+      "dec_seconds": 0.5308782999927644,
+      "dec_mib_s": 17.91120640458343,
+      "peak_ram_bytes": 139464704,
+      "verified": true
+    },
+    "prism_v1": {
+      "size": 2448230,
+      "ratio_pct": 24.55457885832737,
+      "enc_seconds": 0.42645379999885336,
+      "enc_mib_s": 22.297071351950276,
+      "dec_seconds": 0.2954759999993257,
+      "dec_mib_s": 32.18085667501409,
+      "peak_ram_bytes": 58249216,
+      "verified": true
+    },
+    "prism": {
+      "size": 2448230,
+      "ratio_pct": 24.55457885832737,
+      "enc_seconds": 0.18934459998854436,
+      "enc_mib_s": 50.21886448021256,
+      "dec_seconds": 0.19734889999381267,
+      "dec_mib_s": 48.18203094713416,
+      "peak_ram_bytes": 58388480,
+      "verified": true
+    },
+    "prism_wins": {
+      "size": true,
+      "enc_speed": true,
+      "dec_speed": true
+    }
+  },
+  {
+    "target": "sao",
+    "is_directory": false,
+    "orig_bytes": 7251944,
+    "orig_mib": 6.915992736816406,
+    "7z": {
+      "size": 4413926,
+      "ratio_pct": 60.86541760388663,
+      "enc_seconds": 4.791092900006333,
+      "enc_mib_s": 1.443510464346718,
+      "dec_seconds": 0.5468833000049926,
+      "dec_mib_s": 12.646194785529689,
+      "peak_ram_bytes": 98193408,
+      "verified": true
+    },
+    "prism_v1": {
+      "size": 4053840,
+      "ratio_pct": 55.90004556019738,
+      "enc_seconds": 1.6904420000209939,
+      "enc_mib_s": 4.091233379631194,
+      "dec_seconds": 0.23777600002358668,
+      "dec_mib_s": 29.086168226105073,
+      "peak_ram_bytes": 114532352,
+      "verified": true
+    },
+    "prism": {
+      "size": 4053840,
+      "ratio_pct": 55.90004556019738,
+      "enc_seconds": 0.7085078999807592,
+      "enc_mib_s": 9.761348796540197,
+      "dec_seconds": 0.10127949999878183,
+      "dec_mib_s": 68.2862053712705,
+      "peak_ram_bytes": 113172480,
+      "verified": true
+    },
+    "prism_wins": {
+      "size": true,
+      "enc_speed": true,
+      "dec_speed": true
+    }
+  },
+  {
+    "target": "dedup_suite",
+    "is_directory": true,
+    "orig_bytes": 135130873,
+    "orig_mib": 128.87084293365479,
+    "7z": {
+      "size": 19628480,
+      "ratio_pct": 14.525533332416199,
+      "enc_seconds": 107.05495719998726,
+      "enc_mib_s": 1.2037821162537452,
+      "dec_seconds": 2.3042909000068903,
+      "dec_mib_s": 55.92646437707558,
+      "peak_ram_bytes": 1500770304,
+      "verified": true
+    },
+    "prism_v1": {
+      "size": 19270779,
+      "ratio_pct": 14.260826243607557,
+      "enc_seconds": 24.938014800020028,
+      "enc_mib_s": 5.167646421219996,
+      "dec_seconds": 0.9412810000067111,
+      "dec_mib_s": 136.91006504193325,
+      "peak_ram_bytes": 1162252288,
+      "verified": true
+    },
+    "prism": {
+      "size": 19322077,
+      "ratio_pct": 14.298787960912529,
+      "enc_seconds": 7.898076200013747,
+      "enc_mib_s": 16.31673836388543,
+      "dec_seconds": 0.7594071000057738,
+      "dec_mib_s": 169.69928636784536,
+      "peak_ram_bytes": 1027493888,
+      "verified": true
+    },
+    "prism_wins": {
+      "size": true,
+      "enc_speed": true,
+      "dec_speed": true
+    }
+  }
+]

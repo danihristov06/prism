@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+build/
+deps/
+dist/
+*.prism
+*.7z
+*.o
+*.a
+*.gcda
+*.gcno
+prism.exe
+prism
+benchmark_prism_vs_7z.py
