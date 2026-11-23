@@ -554,32 +554,103 @@ inline ByteVec lzma2_parallel_compress(const uint8_t* src, size_t len, int dict_
         bool ok = false;
         uint8_t prop_byte = 0xFF;
 
-        CLzma2EncHandle enc = Lzma2Enc_Create(&g_Alloc, &g_BigAlloc);
-        if (enc) {
-            CLzma2EncProps props;
-            Lzma2EncProps_Init(&props);
-            props.lzmaProps.level = level;
-            props.lzmaProps.lc = lc;
-            props.lzmaProps.lp = lp;
-            props.lzmaProps.pb = pb;
-            props.lzmaProps.dictSize = std::min<uint32_t>((uint32_t)dict_mb * 1024U * 1024U, std::max<uint32_t>(65536U, (uint32_t)c_len));
-            props.lzmaProps.fb = fb;
-            props.lzmaProps.btMode = 1;
-            props.lzmaProps.numHashBytes = 4;
-            props.lzmaProps.mc = mc;
-            props.lzmaProps.writeEndMark = 0;
-            props.lzmaProps.numThreads = inner_threads;
-            props.blockSize = LZMA2_ENC_PROPS_BLOCK_SIZE_SOLID;
-            props.numBlockThreads_Max = 1;
-            props.numTotalThreads = inner_threads;
-            if (Lzma2Enc_SetProps(enc, &props) == SZ_OK) {
-                Lzma2Enc_SetDataSize(enc, (UInt64)c_len);
-                prop_byte = Lzma2Enc_WriteProperties(enc);
-                out_sz = out_cap;
-                SRes res = Lzma2Enc_Encode2(enc, NULL, chunk_out.get(), &out_sz, NULL, src + chunk_off, c_len, NULL);
-                ok = (res == SZ_OK && out_sz < c_len);
+        int best_lc = lc, best_lp = lp, best_pb = pb;
+        bool use_bsc_chunk = false;
+
+        if (!g_fast_mode && c_len >= 2ULL * 1024 * 1024) {
+            constexpr size_t SL = 32768;
+            constexpr size_t SAMPLE_SZ = SL * 3;
+            uint8_t sample_buf[SAMPLE_SZ];
+            const size_t offs[3] = { c_len * 15 / 100, c_len * 50 / 100, c_len * 85 / 100 };
+            for (int s = 0; s < 3; ++s) {
+                size_t so = std::min(offs[s], c_len - SL);
+                std::memcpy(sample_buf + s * SL, src + chunk_off + so, SL);
             }
-            Lzma2Enc_Destroy(enc);
+
+            static constexpr int kCtx[4][3] = {
+                {3, 0, 2},
+                {1, 2, 2},
+                {0, 2, 2},
+                {1, 1, 1},
+            };
+            size_t best_lz_sz = SAMPLE_SZ + 1024;
+            uint8_t probe_out[SAMPLE_SZ + LIBBSC_HEADER_SIZE + 128];
+
+            for (int ci = 0; ci < 4; ++ci) {
+                CLzmaEncProps p;
+                LzmaEncProps_Init(&p);
+                p.level = 1;
+                p.lc = kCtx[ci][0];
+                p.lp = kCtx[ci][1];
+                p.pb = kCtx[ci][2];
+                p.dictSize = 128 * 1024;
+                p.fb = 16;
+                p.btMode = 0;
+                p.numHashBytes = 4;
+                p.mc = 8;
+                p.writeEndMark = 0;
+                p.numThreads = 1;
+                SizeT dl = SAMPLE_SZ + 128;
+                Byte pe[5];
+                SizeT ps = 5;
+                if (LzmaEncode(probe_out, &dl, sample_buf, SAMPLE_SZ, &p, pe, &ps, 0, NULL, &g_Alloc, &g_Alloc) == SZ_OK) {
+                    if (static_cast<size_t>(dl) < best_lz_sz) {
+                        best_lz_sz = static_cast<size_t>(dl);
+                        best_lc = kCtx[ci][0];
+                        best_lp = kCtx[ci][1];
+                        best_pb = kCtx[ci][2];
+                    }
+                }
+            }
+
+            bsc_init_once();
+            int bsc_r = bsc_compress(sample_buf, probe_out, static_cast<int>(SAMPLE_SZ), 15, 72, LIBBSC_BLOCKSORTER_BWT, LIBBSC_CODER_QLFC_FAST, LIBBSC_FEATURE_FASTMODE);
+            if (bsc_r > 0 && static_cast<size_t>(bsc_r) * 100ULL <= best_lz_sz * 97ULL) {
+                use_bsc_chunk = true;
+            }
+        }
+
+        if (use_bsc_chunk) {
+            bsc_init_once();
+            int coder = (g_comp_level >= 9) ? LIBBSC_CODER_QLFC_ADAPTIVE : LIBBSC_CODER_QLFC_STATIC;
+            int lzp_h = (g_comp_level >= 9) ? 17 : 16;
+            int lzp_m = (g_comp_level >= 9) ? 32 : 48;
+            int bres = bsc_compress(src + chunk_off, chunk_out.get(), static_cast<int>(c_len), lzp_h, lzp_m, LIBBSC_BLOCKSORTER_BWT, coder, LIBBSC_FEATURE_FASTMODE);
+            if (bres > 0 && static_cast<size_t>(bres) < c_len) {
+                out_sz = static_cast<size_t>(bres);
+                prop_byte = 0xFE;
+                ok = true;
+            }
+        }
+
+        if (!ok) {
+            CLzma2EncHandle enc = Lzma2Enc_Create(&g_Alloc, &g_BigAlloc);
+            if (enc) {
+                CLzma2EncProps props;
+                Lzma2EncProps_Init(&props);
+                props.lzmaProps.level = level;
+                props.lzmaProps.lc = best_lc;
+                props.lzmaProps.lp = best_lp;
+                props.lzmaProps.pb = best_pb;
+                props.lzmaProps.dictSize = std::min<uint32_t>((uint32_t)dict_mb * 1024U * 1024U, std::max<uint32_t>(65536U, (uint32_t)c_len));
+                props.lzmaProps.fb = fb;
+                props.lzmaProps.btMode = 1;
+                props.lzmaProps.numHashBytes = 4;
+                props.lzmaProps.mc = mc;
+                props.lzmaProps.writeEndMark = 0;
+                props.lzmaProps.numThreads = inner_threads;
+                props.blockSize = LZMA2_ENC_PROPS_BLOCK_SIZE_SOLID;
+                props.numBlockThreads_Max = 1;
+                props.numTotalThreads = inner_threads;
+                if (Lzma2Enc_SetProps(enc, &props) == SZ_OK) {
+                    Lzma2Enc_SetDataSize(enc, (UInt64)c_len);
+                    prop_byte = Lzma2Enc_WriteProperties(enc);
+                    out_sz = out_cap;
+                    SRes res = Lzma2Enc_Encode2(enc, NULL, chunk_out.get(), &out_sz, NULL, src + chunk_off, c_len, NULL);
+                    ok = (res == SZ_OK && out_sz < c_len);
+                }
+                Lzma2Enc_Destroy(enc);
+            }
         }
         if (ok) {
             comp_chunks[i].size = out_sz;
@@ -660,6 +731,11 @@ inline ByteVec lzma2_parallel_decompress(const uint8_t* src, size_t len) {
         if (props[i] == 0xFF) {
             if (c_len != r_len) { failed = true; continue; }
             std::memcpy(dst, c_src, r_len);
+        } else if (props[i] == 0xFE) {
+            bsc_init_once();
+            if (bsc_decompress(c_src, static_cast<int>(c_len), dst, static_cast<int>(r_len), LIBBSC_FEATURE_FASTMODE) != LIBBSC_NO_ERROR) {
+                failed = true;
+            }
         } else {
             SizeT dest_len = r_len;
             SizeT src_len_lz = c_len;
@@ -930,7 +1006,9 @@ inline ByteVec lrm_ppmd_compress(const uint8_t* src, size_t len, double prog_sca
 inline ByteVec lrm_bsc_compress(const uint8_t* src, size_t len, int coder = 3, int lzp_hash = 15, int lzp_min = 72, int num_chunks_arg = 0, double prog_scale = 1.0) {
     if (len >= 4ULL * 1024 * 1024) {
         int mode = g_fast_mode ? 2 : (g_comp_level >= 9 ? 3 : (g_comp_level >= 7 ? 1 : 0));
-        auto lrm_res = precond::lrm_encode(src, len, mode);
+        size_t far_d = (g_comp_level >= 9) ? (32ULL * 1024 * 1024) : (4ULL * 1024 * 1024);
+        size_t min_loc = (g_comp_level >= 9) ? 192 : 64;
+        auto lrm_res = precond::lrm_encode(src, len, mode, far_d, min_loc);
         if (lrm_res.applied) {
             ByteVec tok_comp;
             {
@@ -969,12 +1047,55 @@ inline ByteVec lrm_lzma2_compress(const uint8_t* src, size_t len, int dict_mb = 
             uint8_t arch; // 1=ARM64, 2=X86_64
         };
         std::vector<MachoSecRange> sec_ranges;
-        // Scan for 64-bit LE Mach-O headers (0xFEEDFACF -> CF FA ED FE)
-        for (size_t p = 0; p + 32 <= len; ) {
-            const void* hit = std::memchr(src + p, 0xCF, (len - 32) - p + 1);
+        // Scan for 64-bit LE Mach-O (0xFEEDFACF -> CF FA ED FE) and 64-bit LE ELF (0x7F 'E' 'L' 'F')
+        for (size_t p = 0; p + 64 <= len; ) {
+            const uint8_t* m_hit = static_cast<const uint8_t*>(std::memchr(src + p, 0xCF, (len - 32) - p + 1));
+            const uint8_t* e_hit = static_cast<const uint8_t*>(std::memchr(src + p, 0x7F, (len - 64) - p + 1));
+            const uint8_t* hit = nullptr;
+            if (m_hit && e_hit) hit = std::min(m_hit, e_hit);
+            else hit = m_hit ? m_hit : e_hit;
             if (!hit) break;
-            size_t pos = static_cast<size_t>(static_cast<const uint8_t*>(hit) - src);
-            if (pos + 32 <= len &&
+            size_t pos = static_cast<size_t>(hit - src);
+            if (src[pos] == 0x7F && pos + 64 <= len &&
+                src[pos + 1] == 'E' && src[pos + 2] == 'L' && src[pos + 3] == 'F' &&
+                src[pos + 4] == 2 && src[pos + 5] == 1) { // ELF64 LE
+                uint16_t e_machine = 0, e_phentsize = 0, e_phnum = 0;
+                uint64_t e_phoff = 0;
+                std::memcpy(&e_machine, src + pos + 18, 2);
+                std::memcpy(&e_phoff, src + pos + 32, 8);
+                std::memcpy(&e_phentsize, src + pos + 54, 2);
+                std::memcpy(&e_phnum, src + pos + 56, 2);
+                uint8_t arch = (e_machine == 183) ? 1 : ((e_machine == 62) ? 2 : 0);
+                if (arch != 0 && e_phnum > 0 && e_phnum <= 128 && e_phentsize >= 56 &&
+                    e_phoff >= 64 && pos + e_phoff + static_cast<size_t>(e_phnum) * e_phentsize <= len) {
+                    size_t max_seg_end = pos + 64;
+                    for (uint16_t pi = 0; pi < e_phnum; ++pi) {
+                        size_t ph = pos + static_cast<size_t>(e_phoff) + static_cast<size_t>(pi) * e_phentsize;
+                        uint32_t p_type = 0, p_flags = 0;
+                        uint64_t p_offset = 0, p_filesz = 0;
+                        std::memcpy(&p_type, src + ph, 4);
+                        std::memcpy(&p_flags, src + ph + 4, 4);
+                        std::memcpy(&p_offset, src + ph + 8, 8);
+                        std::memcpy(&p_filesz, src + ph + 32, 8);
+                        if (p_type == 1 && (p_flags & 1) != 0 && p_filesz >= 64 &&
+                            p_offset >= 64 && pos + p_offset + p_filesz <= len) {
+                            uint64_t abs_off = static_cast<uint64_t>(pos + p_offset);
+                            uint64_t fsz = (arch == 1) ? (p_filesz & ~3ULL) : p_filesz;
+                            if (sec_ranges.empty() || abs_off >= sec_ranges.back().off + sec_ranges.back().sz) {
+                                sec_ranges.push_back(MachoSecRange{abs_off, fsz, arch});
+                                if (abs_off + p_filesz > max_seg_end) {
+                                    max_seg_end = static_cast<size_t>(abs_off + p_filesz);
+                                }
+                            }
+                        }
+                    }
+                    if (max_seg_end > pos + 64) {
+                        p = max_seg_end;
+                        continue;
+                    }
+                }
+            }
+            if (src[pos] == 0xCF && pos + 32 <= len &&
                 src[pos + 1] == 0xFA && src[pos + 2] == 0xED && src[pos + 3] == 0xFE) {
                 uint32_t cputype = 0, ncmds = 0, sizeofcmds = 0;
                 std::memcpy(&cputype, src + pos + 4, 4);
@@ -1039,7 +1160,9 @@ inline ByteVec lrm_lzma2_compress(const uint8_t* src, size_t len, int dict_mb = 
                 }
             }
             ByteVec inner;
-            auto lrm_res = precond::lrm_encode(filtered.data(), filtered.size(), (g_comp_level >= 9) ? 3 : ((g_comp_level >= 7) ? 1 : 0));
+            size_t far_d = (g_comp_level >= 9) ? (32ULL * 1024 * 1024) : (4ULL * 1024 * 1024);
+            size_t min_loc = (g_comp_level >= 9) ? 192 : 64;
+            auto lrm_res = precond::lrm_encode(filtered.data(), filtered.size(), (g_comp_level >= 9) ? 3 : ((g_comp_level >= 7) ? 1 : 0), far_d, min_loc);
             if (lrm_res.applied) {
                 ByteVec tok_comp;
                 {
@@ -1052,11 +1175,11 @@ inline ByteVec lrm_lzma2_compress(const uint8_t* src, size_t len, int dict_mb = 
                     : ((g_comp_level >= 7)
                         ? std::min(6, std::max(2, (int)((lrm_res.literals.size() + 25165823) / 25165824)))
                         : ((g_comp_level >= 5)
-                            ? std::min(6, std::max(4, (int)((lrm_res.literals.size() + 16777215) / 16777216)))
+                            ? std::min(4, std::max(2, (int)((lrm_res.literals.size() + 33554431) / 33554432)))
                             : std::min(max_t, std::max(6, (int)((lrm_res.literals.size() + 4194303) / 4194304)))));
-                int lit_dict = (g_comp_level <= 4) ? std::min(dict_mb, 8) : ((g_comp_level == 5) ? std::max(dict_mb, 32) : dict_mb);
-                int lit_fb   = (g_comp_level <= 4) ? std::min(fb, 32) : fb;
-                int lit_mc   = (g_comp_level <= 4) ? std::min(mc, 16) : mc;
+                int lit_dict = (g_comp_level <= 4) ? std::min(dict_mb, 8) : ((g_comp_level == 5) ? std::max(dict_mb, 64) : dict_mb);
+                int lit_fb   = (g_comp_level <= 4) ? std::min(fb, 32) : ((g_comp_level == 5) ? std::max(fb, 96) : fb);
+                int lit_mc   = (g_comp_level <= 4) ? std::min(mc, 16) : ((g_comp_level == 5) ? std::max(mc, 32) : mc);
                 int lit_lvl  = (g_comp_level <= 4) ? std::min(level, 5) : level;
                 double lit_scale = lrm_res.literals.empty()
                     ? prog_scale
@@ -1093,7 +1216,9 @@ inline ByteVec lrm_lzma2_compress(const uint8_t* src, size_t len, int dict_mb = 
         }
     }
     if (!g_fast_mode && len >= 4ULL * 1024 * 1024) {
-        auto lrm_res = precond::lrm_encode(src, len, (g_comp_level >= 9) ? 3 : ((g_comp_level >= 7) ? 1 : 0));
+        size_t far_d = (g_comp_level >= 9) ? (32ULL * 1024 * 1024) : (4ULL * 1024 * 1024);
+        size_t min_loc = (g_comp_level >= 9) ? 192 : 64;
+        auto lrm_res = precond::lrm_encode(src, len, (g_comp_level >= 9) ? 3 : ((g_comp_level >= 7) ? 1 : 0), far_d, min_loc);
         if (lrm_res.applied) {
             ByteVec tok_comp;
             {
@@ -1106,11 +1231,11 @@ inline ByteVec lrm_lzma2_compress(const uint8_t* src, size_t len, int dict_mb = 
                 : ((g_comp_level >= 7)
                     ? std::min(6, std::max(2, (int)((lrm_res.literals.size() + 25165823) / 25165824)))
                     : ((g_comp_level >= 5)
-                        ? std::min(8, std::max(4, (int)((lrm_res.literals.size() + 8388607) / 8388608)))
+                        ? std::min(4, std::max(2, (int)((lrm_res.literals.size() + 33554431) / 33554432)))
                         : std::min(max_t, std::max(6, (int)((lrm_res.literals.size() + 4194303) / 4194304)))));
-            int lit_dict = (g_comp_level <= 4) ? std::min(dict_mb, 8) : dict_mb;
-            int lit_fb   = (g_comp_level <= 4) ? std::min(fb, 32) : fb;
-            int lit_mc   = (g_comp_level <= 4) ? std::min(mc, 16) : mc;
+            int lit_dict = (g_comp_level <= 4) ? std::min(dict_mb, 8) : ((g_comp_level == 5) ? std::max(dict_mb, 64) : dict_mb);
+            int lit_fb   = (g_comp_level <= 4) ? std::min(fb, 32) : ((g_comp_level == 5) ? std::max(fb, 96) : fb);
+            int lit_mc   = (g_comp_level <= 4) ? std::min(mc, 16) : ((g_comp_level == 5) ? std::max(mc, 32) : mc);
             int lit_lvl  = (g_comp_level <= 4) ? std::min(level, 5) : level;
             double lit_scale = lrm_res.literals.empty()
                 ? prog_scale

@@ -169,9 +169,12 @@ inline ExecType detect_executable(const uint8_t* data, size_t len) {
                     return EXEC_SPARC;
                 }
             } else if (ei_data == 1) {
-                // Little-endian x86 / x64
+                // Little-endian x86 / x64 / ARM64
                 if (e_machine == 3 || e_machine == 62) {
                     return EXEC_X86;
+                }
+                if (e_machine == 183) {
+                    return EXEC_ARM64;
                 }
             }
         }
@@ -411,7 +414,7 @@ inline bool read_leb128(const uint8_t* buf, size_t len, size_t& pos, uint64_t& v
     return false;
 }
 
-inline LrmResult lrm_encode(const uint8_t* data, size_t len, int mode = 0) {
+inline LrmResult lrm_encode(const uint8_t* data, size_t len, int mode = 0, size_t far_dist = 4ULL * 1024 * 1024, size_t min_match_local = 64) {
     LrmResult res;
     res.orig_size = len;
     if (!data || len < 4ULL * 1024 * 1024) {
@@ -429,16 +432,15 @@ inline LrmResult lrm_encode(const uint8_t* data, size_t len, int mode = 0) {
     const size_t HT_SIZE = 1ULL << HT_BITS;
     const uint64_t HT_MASK = HT_SIZE - 1;
     const uint64_t SAMPLE_MASK = (mode == 1 || mode == 3) ? 0x0FULL : ((mode == 2) ? 0x3FULL : 0x1FULL);
-    const size_t MIN_MATCH_LOCAL = 64;
+    const size_t MIN_MATCH_LOCAL = min_match_local;
     const size_t MIN_MATCH_FAR = 32;
     const size_t MIN_MATCH = MIN_MATCH_FAR;
-    const size_t FAR_DIST = 4ULL * 1024 * 1024;
-    const size_t MAX_DIST = 256ULL * 1024 * 1024;
+    const size_t FAR_DIST = far_dist;
+    const size_t MAX_DIST = 512ULL * 1024 * 1024;
     const size_t MIN_DIST = 2048;
 
     struct LrmSlot {
-        uint32_t p0 = 0xFFFFFFFFu;
-        uint32_t p1 = 0xFFFFFFFFu;
+        uint32_t p[4] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
     };
     std::vector<LrmSlot> ht(HT_SIZE);
     res.literals.reserve(len / 2);
@@ -459,14 +461,17 @@ inline LrmResult lrm_encode(const uint8_t* data, size_t len, int mode = 0) {
         if ((h & SAMPLE_MASK) == 0) {
             size_t slot_idx = static_cast<size_t>((h >> 5) & HT_MASK);
             LrmSlot& sl = ht[slot_idx];
-            uint32_t cands[2] = { sl.p0, sl.p1 };
-            sl.p1 = sl.p0;
-            sl.p0 = static_cast<uint32_t>(pos);
+            uint32_t cands[4] = { sl.p[0], sl.p[1], sl.p[2], sl.p[3] };
+            sl.p[3] = sl.p[2];
+            sl.p[2] = sl.p[1];
+            sl.p[1] = sl.p[0];
+            sl.p[0] = static_cast<uint32_t>(pos);
 
             size_t best_mlen = 0;
             size_t best_m_start = 0, best_p_start = 0, best_m_end = 0;
 
-            for (int ci = 0; ci < 2; ++ci) {
+            const int max_ci = (mode >= 3) ? 4 : 2;
+            for (int ci = 0; ci < max_ci; ++ci) {
                 uint32_t prev_u32 = cands[ci];
                 if (prev_u32 == 0xFFFFFFFFu) continue;
                 size_t prev = static_cast<size_t>(prev_u32);

@@ -992,31 +992,27 @@ inline ByteVec compress_tar_demux(const precond::TarDemuxResult& tar_res, uint32
         }
     };
 
-    std::thread tar_thread;
-    std::exception_ptr tar_err;
-    bool tar_async = false;
     if (large_items.size() >= 2) {
-        auto it = std::find(large_items.begin(), large_items.end(), static_cast<int>(precond::BUCKET_TAR_ARCHIVE));
-        if (it != large_items.end()) {
-            large_items.erase(it);
-            tar_async = true;
-            tar_thread = std::thread([&]() {
+        std::mutex err_mtx;
+        std::exception_ptr err_ptr;
+        std::vector<std::thread> workers;
+        workers.reserve(large_items.size());
+        for (int tag : large_items) {
+            workers.emplace_back([&, tag]() {
                 try {
-                    run_item(static_cast<int>(precond::BUCKET_TAR_ARCHIVE));
+                    run_item(tag);
                 } catch (...) {
-                    tar_err = std::current_exception();
+                    std::lock_guard<std::mutex> lock(err_mtx);
+                    if (!err_ptr) err_ptr = std::current_exception();
                 }
             });
         }
-    }
-
-    for (int tag : large_items) {
-        run_item(tag);
-    }
-
-    if (tar_async) {
-        tar_thread.join();
-        if (tar_err) std::rethrow_exception(tar_err);
+        for (auto& w : workers) w.join();
+        if (err_ptr) std::rethrow_exception(err_ptr);
+    } else {
+        for (int tag : large_items) {
+            run_item(tag);
+        }
     }
 
     if (small_items.size() >= 2) {
@@ -1119,31 +1115,27 @@ inline void decode_tar_demux_parts(const uint8_t* data, size_t len, ByteVec& met
         }
     };
 
-    std::thread tar_thread;
-    std::exception_ptr tar_err;
-    bool tar_async = false;
     if (large_items.size() >= 2) {
-        auto it = std::find(large_items.begin(), large_items.end(), static_cast<int>(precond::BUCKET_TAR_ARCHIVE));
-        if (it != large_items.end()) {
-            large_items.erase(it);
-            tar_async = true;
-            tar_thread = std::thread([&]() {
+        std::mutex err_mtx;
+        std::exception_ptr err_ptr;
+        std::vector<std::thread> workers;
+        workers.reserve(large_items.size());
+        for (int tag : large_items) {
+            workers.emplace_back([&, tag]() {
                 try {
-                    run_item(static_cast<int>(precond::BUCKET_TAR_ARCHIVE));
+                    run_item(tag);
                 } catch (...) {
-                    tar_err = std::current_exception();
+                    std::lock_guard<std::mutex> lock(err_mtx);
+                    if (!err_ptr) err_ptr = std::current_exception();
                 }
             });
         }
-    }
-
-    for (int tag : large_items) {
-        run_item(tag);
-    }
-
-    if (tar_async) {
-        tar_thread.join();
-        if (tar_err) std::rethrow_exception(tar_err);
+        for (auto& w : workers) w.join();
+        if (err_ptr) std::rethrow_exception(err_ptr);
+    } else {
+        for (int tag : large_items) {
+            run_item(tag);
+        }
     }
 
     if (small_items.size() >= 2) {
