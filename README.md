@@ -1,24 +1,11 @@
 # PRISM — High-Ratio Parallel Archiver
 
-[![Release](https://img.shields.io/badge/release-v1.0.1-3fb950?style=flat-square)](https://github.com/danihristov06/prism/releases/tag/v1.0.1)
+[![Release](https://img.shields.io/badge/release-v1.0.2-3fb950?style=flat-square)](https://github.com/danihristov06/prism/releases/tag/v1.0.2)
 [![License](https://img.shields.io/badge/license-Apache--2.0-58a6ff?style=flat-square)](LICENSE)
 [![C++17](https://img.shields.io/badge/C%2B%2B-17-blue?style=flat-square)](#building-from-source)
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64-lightgrey?style=flat-square)](#prebuilt-release)
 
 **PRISM** is a multi-threaded C++17 solid directory and file archiver engineered for **maximum compression ratio without sacrificing speed**. Across both standard benchmarks (Silesia Corpus, `dedup_suite`) and large polyglot real-world projects, **PRISM beats `lzma2` (7-Zip `-mx=9`) at both compression ratio and speed** (encode and decode), while guaranteeing **100% lossless recovery** with built-in SHA-256 verification.
-
----
-
-## What's New in v1.0.1
-
-- **Adaptive Per-Chunk Codec & LZMA2 Context Selector**: Probes each >= 2 MB chunk using a 96 KB sample across 4 LZMA `(lc, lp, pb)` configurations and `libbsc` (`QLFC_FAST`), automatically selecting `libbsc` (`0xFE`) when it beats LZMA2 by >= 3% or the optimal LZMA2 context otherwise.
-- **4-Way Associative Long-Range Matcher (LRM)**: Expanded LRM window to `512 MB` with 4-way slot associativity (`mode >= 3`) and backend-aware Ultra thresholds (`32 MB` distance / `192 B` min match).
-- **Universal Binary Branch Filter (ELF64 + Mach-O + PE)**: Extended the `PMCH` filter to detect 64-bit little-endian ELF binaries (`x86_64` & `ARM64` executable `PT_LOAD` segments) alongside Mach-O (`__TEXT,__text`) and PE `BCJ2`.
-- **Full Multi-Bucket Parallel Pipeline & Solid Normal Blocks**: Runs `TEXT`, `BINARY`, `EXEC_X86`, and `TAR_ARCHIVE` buckets concurrently, and uses `64 MB` solid LZMA2 dictionaries in Normal mode (`--level 5`).
-- **Benchmark Gains vs v1.0.0**:
-  - **9-Workload Ultra (`--level 9`)**: GeoMean **`-7.41%` smaller** (`dedup_dir` `-35.2%`, `zip_bundle` `-15.7%`, `mixed_tar` `-7.4%`, `mixed_dir` `-4.9%`) and **`-9.07%` faster encode**.
-  - **9-Workload Normal (`--level 5`)**: GeoMean **`-0.49%` smaller** (`exec_x86` `-4.52%`), **`-6.61%` faster encode**, and **`-2.62%` faster decode**.
-  - **Real-World Polyglot (`467.73 MB`)**: Normal **`-1.95%` smaller** (`81.24 MB` vs `82.86 MB`); Ultra Decode **`-8.9%` faster** (`6.31s` vs `6.93s`).
 
 ---
 
@@ -44,13 +31,13 @@
 
 Mixed real-world application tree containing `153 MB` Mach-O + DWARF binaries, `103 MB` `.js`, `42.58 MB` `.tar.gz`, `39.4 MB` `.map`, `32.8 MB` `.dll`, and `22.7 MB` `.ts`.
 
-![Real-World Polyglot Project: PRISM v1.0.1 vs 7-Zip LZMA2](docs/charts/realworld_vs_lzma2.png)
+![Real-World Polyglot Project: PRISM v1.0.2 vs 7-Zip LZMA2](docs/charts/realworld_vs_lzma2.png)
 
-| Archiver / Preset | Compressed Size | Size vs `lzma2` | Encode Time | Encode Speedup | Decode + Verify Time |
+| Archiver / Preset | Compressed Size | Size vs `lzma2` | Encode Time | Encode Speedup | Decode / SHA-256 Verify |
 | :--- | :---: | :---: | :---: | :---: | :---: |
 | **7-Zip `lzma2` (`-mx=9`)** | `104.00 MB` | Baseline | `80.00s` | `1.00x` | — |
-| **PRISM Normal (`--level 5`)** | **`81.24 MB`** | **`-21.9%` smaller** | **`40.07s`** | **`2.00x` faster** | **`5.77s`** (`81.1 MiB/s`) |
-| **PRISM Ultra (`--level 9`)** | **`79.58 MB`** | **`-23.5%` smaller** | **`66.76s`** | **`1.20x` faster** | **`6.31s`** (`74.1 MiB/s`) |
+| **PRISM Normal (`--level 5`)** | **`81.25 MB`** | **`-21.9%` smaller** | **`34.09s`** | **`2.35x` faster** | **`4.23s`** / **`4.66s`** (`100.4 MiB/s`) |
+| **PRISM Ultra (`--level 9`)** | **`79.58 MB`** | **`-23.5%` smaller** | **`57.38s`** | **`1.39x` faster** | **`5.77s`** / **`5.87s`** (`79.7 MiB/s`) |
 
 ---
 
@@ -82,15 +69,15 @@ PRISM beats 7-Zip `lzma2` (`-mx=9`) on **every single target** in compression ra
 
 ---
 
-### 3. PRISM v1.0.1 vs v1.0.0 Improvements
+### 3. PRISM v1.0.2 vs v1.0.1 Improvements
 
-![PRISM v1.0.1 vs v1.0.0 Improvements](docs/charts/prism_v101_vs_v100.png)
+![PRISM v1.0.2 vs v1.0.1 Improvements](docs/charts/prism_v102_vs_v101.png)
 
 ---
 
-### 4. PRISM v1.0.1 (PGO) 9-Workload Verification Suite
+### 4. PRISM v1.0.2 (PGO) 9-Workload Verification Suite
 
-![PRISM v1.0.1 PGO 9-Workload Suite](docs/charts/prism_v10_suite.png)
+![PRISM v1.0.2 PGO 9-Workload Suite](docs/charts/prism_v102_suite.png)
 
 ---
 
@@ -175,7 +162,51 @@ Optional flags:
 
 ## Prebuilt Release
 
-Prebuilt Windows x64 PGO binaries (`prism-v1.0.1-windows-x64.zip`, `prism.exe`, and `SHA256SUMS.txt`) are available on the [GitHub Releases](https://github.com/danihristov06/prism/releases) page.
+Prebuilt Windows x64 PGO binaries (`prism-v1.0.2-windows-x64.zip`, `prism.exe`, and `SHA256SUMS.txt`) are available on the [GitHub Releases](https://github.com/danihristov06/prism/releases) page.
+
+---
+
+## What's New
+
+### v1.0.2
+
+- **Hardware SHA-NI Acceleration**: Added x86 SHA-NI (`_mm_sha256rnds2_epu32`, `_mm_sha256msg1_epu32`, `_mm_sha256msg2_epu32`) for `Sha256::compress_block` with automatic scalar fallback for `--portable` builds, cutting 467 MB SHA-256 verification overhead from ~2.2–2.6s to ~0.1–0.4s.
+- **Zero-Alloc `PDIR` SHA-256 Verification**: Eliminated 35,576+ `std::string` / `std::to_string` heap allocations in `cmd_verify` using zero-copy `const char*` views, stack formatting, and an `O(N)` already-sorted fast path.
+- **OpenMP Thread-Limit Control & LPT Chunk Scheduling**: Added `decode_thread_limit()` to prevent nested OpenMP oversubscription across `bsc`, `lzma2`, `lzma`, and `ppmd` decoders, plus Longest-Processing-Time (`comp_lens[a] > comp_lens[b]`) chunk scheduling.
+- **Parallel Decode Pipelines**: Parallelized `PMCH` section branch filtering, `lrm_lzma2_decompress` (`tokens` + `literals`), `exec_x86` (`c_main` + `c_call`/`c_jump`/`c_rc`), `tar_demux_decode`, `cdc_decode`, and `decode_tar_demux_parts` (running `small_items` concurrently while `large_items` decode).
+- **Improved Ultra 96 KB LZMA Probe**: Upgraded the Ultra chunk probe (`level=3, btMode=1, fb=32, mc=16, dict=256KB`) and tightened BSC hijack thresholds (`<= 95%` Ultra / `<= 96%` Normal), fixing the `exec_x86` Ultra regression (`-4.60%` smaller, `+368.7%` faster decode).
+- **Benchmark Gains vs v1.0.1**:
+  - **Real-World Polyglot (`467.73 MB`)**: Normal encode **`-5.9%`** (`34.09s` vs `36.23s`), Normal decode **`-8.0%`** (`4.23s` vs `4.60s`), Normal SHA-256 verify **`-35.5%`** (`4.66s` vs `7.23s`); Ultra encode **`-5.1%`** (`57.38s` vs `60.47s`), Ultra SHA-256 verify **`-25.2%`** (`5.87s` vs `7.85s`).
+  - **9-Workload Normal (`--level 5`)**: GeoMean **`+3.75%` faster encode**, **`+2.02%` faster decode** (`exec_x86` `+32.1%`), **`+0.000%` size**.
+  - **9-Workload Ultra (`--level 9`)**: GeoMean **`-0.804%` smaller** (`exec_x86` `-4.602%`) and **`+13.17%` faster decode** (`exec_x86` `+368.7%`).
+
+<details>
+<summary>v1.0.1 Changelog</summary>
+
+- **Adaptive Per-Chunk Codec & LZMA2 Context Selector**: Probes each >= 2 MB chunk using a 96 KB sample across 4 LZMA `(lc, lp, pb)` configurations and `libbsc` (`QLFC_FAST`), automatically selecting `libbsc` (`0xFE`) when it beats LZMA2 by >= 3% or the optimal LZMA2 context otherwise.
+- **4-Way Associative Long-Range Matcher (LRM)**: Expanded LRM window to `512 MB` with 4-way slot associativity (`mode >= 3`) and backend-aware Ultra thresholds (`32 MB` distance / `192 B` min match).
+- **Universal Binary Branch Filter (ELF64 + Mach-O + PE)**: Extended the `PMCH` filter to detect 64-bit little-endian ELF binaries (`x86_64` & `ARM64` executable `PT_LOAD` segments) alongside Mach-O (`__TEXT,__text`) and PE `BCJ2`.
+- **Full Multi-Bucket Parallel Pipeline & Solid Normal Blocks**: Runs `TEXT`, `BINARY`, `EXEC_X86`, and `TAR_ARCHIVE` buckets concurrently, and uses `64 MB` solid LZMA2 dictionaries in Normal mode (`--level 5`).
+
+</details>
+
+---
+
+## Roadmap & TODO
+
+- **Desktop GUI (`prism_gui.py`)**:
+  - [ ] Improve overall UI layout, visual polish, and responsiveness
+  - [ ] Fix UI loading states (non-blocking async loading/progress, prevent freezes on large archives, clean cancellation)
+  - [ ] Support opening files directly from inside an archive (extract-to-temp and open with default OS application)
+  - [ ] Fix overwrite behavior (currently not working properly — reliable overwrite / skip / prompt handling in GUI and CLI sync)
+  - [ ] Add drag-and-drop archiving/extraction, in-archive search/filter, and persistent settings
+- **CLI, Packaging & Platform**:
+  - [ ] Windows Explorer context-menu integration & `.prism` file association
+  - [ ] Standalone GUI bundle / installer (no separate Python install needed)
+  - [ ] Automated Linux & macOS builds and CI release pipeline
+- **Compression Engine**:
+  - [ ] Further Ultra decode throughput tuning without sacrificing compression ratio
+  - [ ] Archive append/update support and streaming (`stdin`/`stdout`) mode
 
 ---
 

@@ -345,6 +345,16 @@ inline bool cdc_decode(const uint8_t* unique_payload, size_t up_len,
     size_t ct_cursor = 0;
     size_t out_cursor = 0;
 
+    struct CopySpan {
+        const uint8_t* src;
+        size_t dst_off;
+        size_t len;
+    };
+    std::vector<CopySpan> spans;
+    if (out_size >= 4ULL * 1024 * 1024) {
+        spans.reserve(ct_len / 4);
+    }
+
     while (ct_cursor + 4 <= ct_len) {
         uint32_t tag = read_le32(chunk_table + ct_cursor);
         ct_cursor += 4;
@@ -356,7 +366,11 @@ inline bool cdc_decode(const uint8_t* unique_payload, size_t up_len,
             chunk_lengths.push_back(clen);
 
             if (clen > 0) {
-                std::memcpy(out.data() + out_cursor, unique_payload + up_cursor, clen);
+                if (out_size >= 4ULL * 1024 * 1024) {
+                    spans.push_back(CopySpan{unique_payload + up_cursor, out_cursor, clen});
+                } else {
+                    std::memcpy(out.data() + out_cursor, unique_payload + up_cursor, clen);
+                }
             }
             up_cursor += clen;
             out_cursor += clen;
@@ -368,13 +382,24 @@ inline bool cdc_decode(const uint8_t* unique_payload, size_t up_len,
             if (off > up_len || clen > up_len - off || clen > out_size - out_cursor) return false;
 
             if (clen > 0) {
-                std::memcpy(out.data() + out_cursor, unique_payload + off, clen);
+                if (out_size >= 4ULL * 1024 * 1024) {
+                    spans.push_back(CopySpan{unique_payload + off, out_cursor, clen});
+                } else {
+                    std::memcpy(out.data() + out_cursor, unique_payload + off, clen);
+                }
             }
             out_cursor += clen;
         }
     }
 
-    return out_cursor == out_size;
+    if (out_cursor != out_size) return false;
+    if (!spans.empty()) {
+        #pragma omp parallel for schedule(dynamic, 32)
+        for (int i = 0; i < static_cast<int>(spans.size()); ++i) {
+            std::memcpy(out.data() + spans[i].dst_off, spans[i].src, spans[i].len);
+        }
+    }
+    return true;
 }
 
 inline void write_leb128(ByteVec& out, uint64_t v) {
@@ -1644,8 +1669,48 @@ inline bool tar_demux_decode(const uint8_t* meta, size_t meta_len,
 
     size_t bucket_cursors[BUCKET_COUNT] = {0};
     size_t meta_cursor = 0;
-
     size_t out_cursor = 0;
+
+    if (orig_size >= 4ULL * 1024 * 1024) {
+        struct CopySpan {
+            const uint8_t* src;
+            size_t dst_off;
+            size_t len;
+        };
+        std::vector<CopySpan> spans;
+        spans.reserve(meta_len / 6 + 64);
+        while (meta_cursor < meta_len) {
+            uint8_t op = meta[meta_cursor++];
+            if (op == OP_RAW_CHUNK) {
+                if (meta_cursor + 4 > meta_len) return false;
+                uint32_t clen = read_le32(meta + meta_cursor);
+                meta_cursor += 4;
+                if (meta_cursor + clen > meta_len || out_cursor + clen > orig_size) return false;
+                if (clen > 0) spans.push_back(CopySpan{meta + meta_cursor, out_cursor, clen});
+                meta_cursor += clen;
+                out_cursor += clen;
+            } else if (op == OP_BUCKET_ENTRY) {
+                if (meta_cursor + 5 > meta_len) return false;
+                uint8_t b_id = meta[meta_cursor++];
+                uint32_t entry_len = read_le32(meta + meta_cursor);
+                meta_cursor += 4;
+                if (b_id >= BUCKET_COUNT) return false;
+                if (bucket_cursors[b_id] + entry_len > buckets[b_id].size() || out_cursor + entry_len > orig_size) return false;
+                if (entry_len > 0) spans.push_back(CopySpan{buckets[b_id].data() + bucket_cursors[b_id], out_cursor, entry_len});
+                bucket_cursors[b_id] += entry_len;
+                out_cursor += entry_len;
+            } else {
+                return false;
+            }
+        }
+        if (out_cursor != orig_size) return false;
+        uint8_t* out_ptr = out.data();
+        #pragma omp parallel for schedule(dynamic, 64)
+        for (int i = 0; i < static_cast<int>(spans.size()); ++i) {
+            std::memcpy(out_ptr + spans[i].dst_off, spans[i].src, spans[i].len);
+        }
+        return true;
+    }
 
     while (meta_cursor < meta_len) {
         uint8_t op = meta[meta_cursor++];

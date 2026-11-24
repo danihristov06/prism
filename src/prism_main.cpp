@@ -910,10 +910,26 @@ inline ByteVec decode_sub_codec_payload(uint8_t sub_codec_id, const uint8_t* pda
         uint32_t t_sz2 = 0;
         std::memcpy(&t_sz2, pdata + 8, 4);
         if (12 + (size_t)t_sz2 > plen) throw std::runtime_error("Invalid zip bucket truncated");
-        ByteVec t_trans = (t_sz2 >= 12 && std::memcmp(pdata + 12, "PTZD", 4) == 0)
-            ? decompress_tar_zip_demux(pdata + 12, t_sz2)
-            : codecs::lzma_auto_decompress(pdata + 12, t_sz2);
-        ByteVec p_comp = codecs::bsc_parallel_decompress(pdata + 12 + t_sz2, plen - 12 - t_sz2);
+        ByteVec t_trans, p_comp;
+        if (plen - 12 - t_sz2 >= 65536) {
+            std::exception_ptr p_err;
+            std::thread p_thr([&]() {
+                codecs::g_tl_decode_threads = 1;
+                try { p_comp = codecs::bsc_parallel_decompress(pdata + 12 + t_sz2, plen - 12 - t_sz2); }
+                catch (...) { p_err = std::current_exception(); }
+                codecs::g_tl_decode_threads = 0;
+            });
+            t_trans = (t_sz2 >= 12 && std::memcmp(pdata + 12, "PTZD", 4) == 0)
+                ? decompress_tar_zip_demux(pdata + 12, t_sz2)
+                : codecs::lzma_auto_decompress(pdata + 12, t_sz2);
+            p_thr.join();
+            if (p_err) std::rethrow_exception(p_err);
+        } else {
+            t_trans = (t_sz2 >= 12 && std::memcmp(pdata + 12, "PTZD", 4) == 0)
+                ? decompress_tar_zip_demux(pdata + 12, t_sz2)
+                : codecs::lzma_auto_decompress(pdata + 12, t_sz2);
+            p_comp = codecs::bsc_parallel_decompress(pdata + 12 + t_sz2, plen - 12 - t_sz2);
+        }
         ByteVec out;
         if (!precond::zip_precomp_decode(t_trans.data(), t_trans.size(), p_comp.data(), p_comp.size(), b_orig, out)) {
             throw std::runtime_error("zip_precomp_decode failed");
@@ -993,19 +1009,35 @@ inline ByteVec compress_tar_demux(const precond::TarDemuxResult& tar_res, uint32
     };
 
     if (large_items.size() >= 2) {
+        std::sort(large_items.begin(), large_items.end(), [&](int a, int b) {
+            uint64_t sa = (a == -1) ? tar_res.meta_stream.size() : tar_res.buckets[a].size();
+            uint64_t sb = (b == -1) ? tar_res.meta_stream.size() : tar_res.buckets[b].size();
+            return sa > sb;
+        });
         std::mutex err_mtx;
         std::exception_ptr err_ptr;
         std::vector<std::thread> workers;
         workers.reserve(large_items.size());
+        const int per_worker_t = std::max(2, (omp_get_max_threads() + static_cast<int>(large_items.size()) - 1) / static_cast<int>(large_items.size()));
         for (int tag : large_items) {
-            workers.emplace_back([&, tag]() {
+            workers.emplace_back([&, tag, per_worker_t]() {
+                codecs::g_tl_decode_threads = per_worker_t;
                 try {
                     run_item(tag);
                 } catch (...) {
                     std::lock_guard<std::mutex> lock(err_mtx);
                     if (!err_ptr) err_ptr = std::current_exception();
                 }
+                codecs::g_tl_decode_threads = 0;
             });
+        }
+        for (int tag : small_items) {
+            try {
+                run_item(tag);
+            } catch (...) {
+                std::lock_guard<std::mutex> lock(err_mtx);
+                if (!err_ptr) err_ptr = std::current_exception();
+            }
         }
         for (auto& w : workers) w.join();
         if (err_ptr) std::rethrow_exception(err_ptr);
@@ -1013,22 +1045,6 @@ inline ByteVec compress_tar_demux(const precond::TarDemuxResult& tar_res, uint32
         for (int tag : large_items) {
             run_item(tag);
         }
-    }
-
-    if (small_items.size() >= 2) {
-        std::mutex err_mtx;
-        std::exception_ptr err_ptr;
-        #pragma omp parallel for schedule(dynamic, 1)
-        for (int i = 0; i < static_cast<int>(small_items.size()); ++i) {
-            try {
-                run_item(small_items[i]);
-            } catch (...) {
-                std::lock_guard<std::mutex> lock(err_mtx);
-                if (!err_ptr) err_ptr = std::current_exception();
-            }
-        }
-        if (err_ptr) std::rethrow_exception(err_ptr);
-    } else {
         for (int tag : small_items) {
             run_item(tag);
         }
@@ -1116,19 +1132,35 @@ inline void decode_tar_demux_parts(const uint8_t* data, size_t len, ByteVec& met
     };
 
     if (large_items.size() >= 2) {
+        std::sort(large_items.begin(), large_items.end(), [&](int a, int b) {
+            uint64_t sa = (a == -1) ? meta_orig_est : bdesc[a].b_orig;
+            uint64_t sb = (b == -1) ? meta_orig_est : bdesc[b].b_orig;
+            return sa > sb;
+        });
         std::mutex err_mtx;
         std::exception_ptr err_ptr;
         std::vector<std::thread> workers;
         workers.reserve(large_items.size());
+        const int per_worker_t = std::max(2, (omp_get_max_threads() + static_cast<int>(large_items.size()) - 1) / static_cast<int>(large_items.size()));
         for (int tag : large_items) {
-            workers.emplace_back([&, tag]() {
+            workers.emplace_back([&, tag, per_worker_t]() {
+                codecs::g_tl_decode_threads = per_worker_t;
                 try {
                     run_item(tag);
                 } catch (...) {
                     std::lock_guard<std::mutex> lock(err_mtx);
                     if (!err_ptr) err_ptr = std::current_exception();
                 }
+                codecs::g_tl_decode_threads = 0;
             });
+        }
+        for (int tag : small_items) {
+            try {
+                run_item(tag);
+            } catch (...) {
+                std::lock_guard<std::mutex> lock(err_mtx);
+                if (!err_ptr) err_ptr = std::current_exception();
+            }
         }
         for (auto& w : workers) w.join();
         if (err_ptr) std::rethrow_exception(err_ptr);
@@ -1136,22 +1168,6 @@ inline void decode_tar_demux_parts(const uint8_t* data, size_t len, ByteVec& met
         for (int tag : large_items) {
             run_item(tag);
         }
-    }
-
-    if (small_items.size() >= 2) {
-        std::mutex err_mtx;
-        std::exception_ptr err_ptr;
-        #pragma omp parallel for schedule(dynamic, 1)
-        for (int i = 0; i < static_cast<int>(small_items.size()); ++i) {
-            try {
-                run_item(small_items[i]);
-            } catch (...) {
-                std::lock_guard<std::mutex> lock(err_mtx);
-                if (!err_ptr) err_ptr = std::current_exception();
-            }
-        }
-        if (err_ptr) std::rethrow_exception(err_ptr);
-    } else {
         for (int tag : small_items) {
             run_item(tag);
         }
@@ -2310,6 +2326,79 @@ private:
     }
 
     static void compress_block(uint32_t st[8], const uint8_t block[64]) {
+#if defined(__SHA__) && defined(__SSSE3__) && defined(__SSE4_1__)
+        const __m128i shuf_mask = _mm_set_epi64x(0x0c0d0e0f08090a0bULL, 0x0405060700010203ULL);
+        __m128i tmp = _mm_shuffle_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i*>(st + 0)), 0xB1);
+        __m128i state1 = _mm_shuffle_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i*>(st + 4)), 0xB1);
+        __m128i state0 = _mm_alignr_epi8(tmp, state1, 8);
+        state1 = _mm_blend_epi16(state1, tmp, 0xF0);
+        const __m128i abef_save = state0;
+        const __m128i cdgh_save = state1;
+
+        __m128i msg0 = _mm_shuffle_epi8(_mm_loadu_si128(reinterpret_cast<const __m128i*>(block + 0)), shuf_mask);
+        __m128i msg1 = _mm_shuffle_epi8(_mm_loadu_si128(reinterpret_cast<const __m128i*>(block + 16)), shuf_mask);
+        __m128i msg2 = _mm_shuffle_epi8(_mm_loadu_si128(reinterpret_cast<const __m128i*>(block + 32)), shuf_mask);
+        __m128i msg3 = _mm_shuffle_epi8(_mm_loadu_si128(reinterpret_cast<const __m128i*>(block + 48)), shuf_mask);
+
+        static constexpr uint32_t K4[16][4] = {
+            {0x428a2f98u, 0x71374491u, 0xb5c0fbcfu, 0xe9b5dba5u},
+            {0x3956c25bu, 0x59f111f1u, 0x923f82a4u, 0xab1c5ed5u},
+            {0xd807aa98u, 0x12835b01u, 0x243185beu, 0x550c7dc3u},
+            {0x72be5d74u, 0x80deb1feu, 0x9bdc06a7u, 0xc19bf174u},
+            {0xe49b69c1u, 0xefbe4786u, 0x0fc19dc6u, 0x240ca1ccu},
+            {0x2de92c6fu, 0x4a7484aau, 0x5cb0a9dcu, 0x76f988dau},
+            {0x983e5152u, 0xa831c66du, 0xb00327c8u, 0xbf597fc7u},
+            {0xc6e00bf3u, 0xd5a79147u, 0x06ca6351u, 0x14292967u},
+            {0x27b70a85u, 0x2e1b2138u, 0x4d2c6dfcu, 0x53380d13u},
+            {0x650a7354u, 0x766a0abbu, 0x81c2c92eu, 0x92722c85u},
+            {0xa2bfe8a1u, 0xa81a664bu, 0xc24b8b70u, 0xc76c51a3u},
+            {0xd192e819u, 0xd6990624u, 0xf40e3585u, 0x106aa070u},
+            {0x19a4c116u, 0x1e376c08u, 0x2748774cu, 0x34b0bcb5u},
+            {0x391c0cb3u, 0x4ed8aa4au, 0x5b9cca4fu, 0x682e6ff3u},
+            {0x748f82eeu, 0x78a5636fu, 0x84c87814u, 0x8cc70208u},
+            {0x90befffau, 0xa4506cebu, 0xbef9a3f7u, 0xc67178f2u}
+        };
+
+        auto round4 = [&](int idx, __m128i m) {
+            __m128i msg = _mm_add_epi32(m, _mm_loadu_si128(reinterpret_cast<const __m128i*>(K4[idx])));
+            state1 = _mm_sha256rnds2_epu32(state1, state0, msg);
+            msg = _mm_shuffle_epi32(msg, 0x0E);
+            state0 = _mm_sha256rnds2_epu32(state0, state1, msg);
+        };
+
+        round4(0, msg0);
+        round4(1, msg1); msg0 = _mm_sha256msg1_epu32(msg0, msg1);
+        round4(2, msg2); msg1 = _mm_sha256msg1_epu32(msg1, msg2);
+        round4(3, msg3); msg2 = _mm_sha256msg1_epu32(msg2, msg3);
+
+        for (int r = 4; r < 16; r += 4) {
+            msg0 = _mm_sha256msg2_epu32(_mm_add_epi32(msg0, _mm_alignr_epi8(msg3, msg2, 4)), msg3);
+            round4(r + 0, msg0);
+            if (r + 1 < 13) msg3 = _mm_sha256msg1_epu32(msg3, msg0);
+
+            msg1 = _mm_sha256msg2_epu32(_mm_add_epi32(msg1, _mm_alignr_epi8(msg0, msg3, 4)), msg0);
+            round4(r + 1, msg1);
+            if (r + 2 < 13) msg0 = _mm_sha256msg1_epu32(msg0, msg1);
+
+            msg2 = _mm_sha256msg2_epu32(_mm_add_epi32(msg2, _mm_alignr_epi8(msg1, msg0, 4)), msg1);
+            round4(r + 2, msg2);
+            if (r + 3 < 13) msg1 = _mm_sha256msg1_epu32(msg1, msg2);
+
+            msg3 = _mm_sha256msg2_epu32(_mm_add_epi32(msg3, _mm_alignr_epi8(msg2, msg1, 4)), msg2);
+            round4(r + 3, msg3);
+            if (r + 4 < 13) msg2 = _mm_sha256msg1_epu32(msg2, msg3);
+        }
+
+        state0 = _mm_add_epi32(state0, abef_save);
+        state1 = _mm_add_epi32(state1, cdgh_save);
+        tmp = _mm_shuffle_epi32(state0, 0x1B);
+        state1 = _mm_shuffle_epi32(state1, 0xB1);
+        state0 = _mm_blend_epi16(tmp, state1, 0xF0);
+        state1 = _mm_alignr_epi8(state1, tmp, 8);
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(st + 0), state0);
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(st + 4), state1);
+        return;
+#else
         static constexpr uint32_t K[64] = {
             0x428a2f98u, 0x71374491u, 0xb5c0fbcfu, 0xe9b5dba5u, 0x3956c25bu, 0x59f111f1u, 0x923f82a4u, 0xab1c5ed5u,
             0xd807aa98u, 0x12835b01u, 0x243185beu, 0x550c7dc3u, 0x72be5d74u, 0x80deb1feu, 0x9bdc06a7u, 0xc19bf174u,
@@ -2358,6 +2447,7 @@ private:
 
         st[0] += a; st[1] += b; st[2] += c; st[3] += d;
         st[4] += e; st[5] += f; st[6] += g; st[7] += h;
+#endif
     }
 };
 
@@ -2396,7 +2486,8 @@ void cmd_verify(const fs::path& input_prism) {
         uint64_t content_bytes = 0;
         if (has_pdir) {
             struct VerifyEntry {
-                std::string rel_path;
+                const char* p;
+                uint16_t len;
                 uint64_t fsize;
                 const uint8_t* data;
             };
@@ -2405,35 +2496,49 @@ void cmd_verify(const fs::path& input_prism) {
             std::vector<VerifyEntry> entries;
             entries.reserve(file_count);
             size_t offset = 8;
+            bool already_sorted = true;
             for (uint32_t i = 0; i < file_count; ++i) {
                 uint16_t path_len = 0;
                 std::memcpy(&path_len, decomp.data() + offset, 2);
                 offset += 2;
-                std::string rel_path(reinterpret_cast<const char*>(decomp.data() + offset), path_len);
-                for (char& ch : rel_path) {
-                    if (ch == '\\') ch = '/';
-                }
+                const char* rel_ptr = reinterpret_cast<const char*>(decomp.data() + offset);
                 offset += path_len;
                 uint64_t fsize = 0;
                 std::memcpy(&fsize, decomp.data() + offset, 8);
                 offset += 8;
                 const uint8_t* fdata = decomp.data() + offset;
                 offset += static_cast<size_t>(fsize);
-                entries.push_back(VerifyEntry{std::move(rel_path), fsize, fdata});
-            }
-            std::sort(entries.begin(), entries.end(), [](const VerifyEntry& a, const VerifyEntry& b) {
-                const size_t n = std::min(a.rel_path.size(), b.rel_path.size());
-                if (n > 0) {
-                    int cmp = std::memcmp(a.rel_path.data(), b.rel_path.data(), n);
-                    if (cmp != 0) return cmp < 0;
+                if (already_sorted && !entries.empty()) {
+                    const auto& prev = entries.back();
+                    const size_t n = std::min<size_t>(prev.len, path_len);
+                    int cmp = (n > 0) ? std::memcmp(prev.p, rel_ptr, n) : 0;
+                    if (cmp > 0 || (cmp == 0 && prev.len > path_len)) {
+                        already_sorted = false;
+                    }
                 }
-                return a.rel_path.size() < b.rel_path.size();
-            });
+                entries.push_back(VerifyEntry{rel_ptr, path_len, fsize, fdata});
+            }
+            if (!already_sorted) {
+                std::sort(entries.begin(), entries.end(), [](const VerifyEntry& a, const VerifyEntry& b) {
+                    const size_t n = std::min<size_t>(a.len, b.len);
+                    if (n > 0) {
+                        int cmp = std::memcmp(a.p, b.p, n);
+                        if (cmp != 0) return cmp < 0;
+                    }
+                    return a.len < b.len;
+                });
+            }
+            char sz_buf[32];
             for (const auto& e : entries) {
                 content_bytes += e.fsize;
-                sha.update(reinterpret_cast<const uint8_t*>(e.rel_path.data()), e.rel_path.size());
-                std::string sz_str = std::to_string(e.fsize);
-                sha.update(reinterpret_cast<const uint8_t*>(sz_str.data()), sz_str.size());
+                sha.update(reinterpret_cast<const uint8_t*>(e.p), e.len);
+                uint64_t v = e.fsize;
+                int si = 32;
+                do {
+                    sz_buf[--si] = static_cast<char>('0' + (v % 10));
+                    v /= 10;
+                } while (v > 0);
+                sha.update(reinterpret_cast<const uint8_t*>(sz_buf + si), static_cast<size_t>(32 - si));
                 if (e.fsize > 0) {
                     sha.update(e.data, static_cast<size_t>(e.fsize));
                 }

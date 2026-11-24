@@ -104,6 +104,11 @@ inline void emit_chunk_progress(size_t chunk_len, double prog_scale = 1.0) {
 }
 
 // BSC Parallel Compression / Decompression with default QLFC_FAST (3)
+inline thread_local int g_tl_decode_threads = 0;
+inline int decode_thread_limit() {
+    int m = std::max(1, omp_get_max_threads());
+    return (g_tl_decode_threads > 0) ? std::min(m, g_tl_decode_threads) : m;
+}
 inline ByteVec bsc_parallel_compress(const uint8_t* src, size_t len, int coder = 3, int lzp_hash = 15, int lzp_min = 72, int num_chunks_arg = 0, double prog_scale = 1.0) {
     bsc_init_once();
     if (g_fast_mode && lzp_hash > 0) {
@@ -269,11 +274,19 @@ inline ByteVec bsc_parallel_decompress(const uint8_t* src, size_t len) {
     if (header_size + current_payload_off > len) throw std::runtime_error("Invalid BSC container payload truncated");
 
     ByteVec out(orig_size);
-    int features = (num_chunks > 1 || omp_in_parallel()) ? LIBBSC_FEATURE_FASTMODE : (LIBBSC_FEATURE_FASTMODE | LIBBSC_FEATURE_MULTITHREADING);
+    int d_threads = decode_thread_limit();
+    int features = (num_chunks > 1 || omp_in_parallel() || d_threads <= 1) ? LIBBSC_FEATURE_FASTMODE : (LIBBSC_FEATURE_FASTMODE | LIBBSC_FEATURE_MULTITHREADING);
+
+    std::vector<int> order(num_chunks);
+    for (int i = 0; i < (int)num_chunks; ++i) order[i] = i;
+    if (num_chunks > 1) {
+        std::sort(order.begin(), order.end(), [&](int a, int b) { return comp_lens[a] > comp_lens[b]; });
+    }
 
     bool failed = false;
-    #pragma omp parallel for schedule(dynamic, 1)
-    for (int i = 0; i < (int)num_chunks; ++i) {
+    #pragma omp parallel for num_threads(d_threads) schedule(dynamic, 1)
+    for (int oi = 0; oi < (int)num_chunks; ++oi) {
+        int i = order[oi];
         if (failed) continue;
         size_t out_off = raw_offsets[i];
 
@@ -440,7 +453,7 @@ inline ByteVec lzma_parallel_decompress(const uint8_t* src, size_t len) {
     ByteVec out(orig_size);
     bool failed = false;
 
-    #pragma omp parallel for schedule(dynamic, 1)
+    #pragma omp parallel for num_threads(decode_thread_limit()) schedule(dynamic, 1)
     for (int i = 0; i < (int)num_chunks; ++i) {
         if (failed) continue;
         size_t out_off = raw_offsets[i];
@@ -490,7 +503,7 @@ inline ByteVec lzma2_parallel_compress(const uint8_t* src, size_t len, int dict_
     bool nested = (omp_in_parallel() != 0);
     int inner_threads = (nested || max_t < 4 || len < 4ULL * 1024 * 1024 || num_chunks_arg >= max_t) ? 1 : 2;
     int outer_threads = nested ? 1 : std::max(1, max_t / inner_threads);
-    if (dict_mb >= 16) outer_threads = std::min(outer_threads, 8);
+    if (dict_mb > 32) outer_threads = std::min(outer_threads, 8);
     if (g_comp_level >= 9 && !g_fast_mode) {
         dict_mb = 128;
         fb = 273;
@@ -579,15 +592,23 @@ inline ByteVec lzma2_parallel_compress(const uint8_t* src, size_t len, int dict_
             for (int ci = 0; ci < 4; ++ci) {
                 CLzmaEncProps p;
                 LzmaEncProps_Init(&p);
-                p.level = 1;
+                if (g_comp_level >= 9) {
+                    p.level = 3;
+                    p.dictSize = 256 * 1024;
+                    p.fb = 32;
+                    p.btMode = 1;
+                    p.mc = 16;
+                } else {
+                    p.level = 1;
+                    p.dictSize = 128 * 1024;
+                    p.fb = 16;
+                    p.btMode = 0;
+                    p.mc = 8;
+                }
                 p.lc = kCtx[ci][0];
                 p.lp = kCtx[ci][1];
                 p.pb = kCtx[ci][2];
-                p.dictSize = 128 * 1024;
-                p.fb = 16;
-                p.btMode = 0;
                 p.numHashBytes = 4;
-                p.mc = 8;
                 p.writeEndMark = 0;
                 p.numThreads = 1;
                 SizeT dl = SAMPLE_SZ + 128;
@@ -605,7 +626,8 @@ inline ByteVec lzma2_parallel_compress(const uint8_t* src, size_t len, int dict_
 
             bsc_init_once();
             int bsc_r = bsc_compress(sample_buf, probe_out, static_cast<int>(SAMPLE_SZ), 15, 72, LIBBSC_BLOCKSORTER_BWT, LIBBSC_CODER_QLFC_FAST, LIBBSC_FEATURE_FASTMODE);
-            if (bsc_r > 0 && static_cast<size_t>(bsc_r) * 100ULL <= best_lz_sz * 97ULL) {
+            const size_t bsc_thresh = (g_comp_level >= 9) ? 95ULL : 96ULL;
+            if (bsc_r > 0 && static_cast<size_t>(bsc_r) * 100ULL <= best_lz_sz * bsc_thresh) {
                 use_bsc_chunk = true;
             }
         }
@@ -719,10 +741,18 @@ inline ByteVec lzma2_parallel_decompress(const uint8_t* src, size_t len) {
     if (header_size + cp > len) throw std::runtime_error("Invalid LZMA2 container payload truncated");
     const uint8_t* payload_ptr = src + header_size;
 
+    std::vector<int> order(num_chunks);
+    for (int i = 0; i < (int)num_chunks; ++i) order[i] = i;
+    if (num_chunks > 1) {
+        std::sort(order.begin(), order.end(), [&](int a, int b) { return comp_lens[a] > comp_lens[b]; });
+    }
+
     ByteVec out(orig_size);
     std::atomic<bool> failed{false};
-    #pragma omp parallel for schedule(dynamic, 1)
-    for (int i = 0; i < (int)num_chunks; ++i) {
+    int d_threads = decode_thread_limit();
+    #pragma omp parallel for num_threads(d_threads) schedule(dynamic, 1)
+    for (int oi = 0; oi < (int)num_chunks; ++oi) {
+        int i = order[oi];
         if (failed.load(std::memory_order_relaxed)) continue;
         uint8_t* dst = out.data() + raw_offsets[i];
         const uint8_t* c_src = payload_ptr + payload_offsets[i];
@@ -733,7 +763,10 @@ inline ByteVec lzma2_parallel_decompress(const uint8_t* src, size_t len) {
             std::memcpy(dst, c_src, r_len);
         } else if (props[i] == 0xFE) {
             bsc_init_once();
-            if (bsc_decompress(c_src, static_cast<int>(c_len), dst, static_cast<int>(r_len), LIBBSC_FEATURE_FASTMODE) != LIBBSC_NO_ERROR) {
+            int bfeat = (num_chunks == 1 && !omp_in_parallel() && d_threads > 1)
+                ? (LIBBSC_FEATURE_FASTMODE | LIBBSC_FEATURE_MULTITHREADING)
+                : LIBBSC_FEATURE_FASTMODE;
+            if (bsc_decompress(c_src, static_cast<int>(c_len), dst, static_cast<int>(r_len), bfeat) != LIBBSC_NO_ERROR) {
                 failed = true;
             }
         } else {
@@ -928,7 +961,7 @@ inline ByteVec ppmd_parallel_decompress(const uint8_t* src, size_t len) {
 
     ByteVec out(orig_size);
     std::atomic<bool> failed{false};
-    #pragma omp parallel for schedule(dynamic, 1)
+    #pragma omp parallel for num_threads(decode_thread_limit()) schedule(dynamic, 1)
     for (int i = 0; i < static_cast<int>(num_chunks); ++i) {
         if (failed.load(std::memory_order_relaxed)) continue;
         uint8_t* dst = out.data() + raw_offs[i];
@@ -1151,7 +1184,9 @@ inline ByteVec lrm_lzma2_compress(const uint8_t* src, size_t len, int dict_mb = 
         }
         if (!sec_ranges.empty()) {
             ByteVec filtered(src, src + len);
-            for (const auto& r : sec_ranges) {
+            #pragma omp parallel for schedule(dynamic, 1) if(sec_ranges.size() >= 4)
+            for (int ri = 0; ri < static_cast<int>(sec_ranges.size()); ++ri) {
+                const auto& r = sec_ranges[ri];
                 if (r.arch == 1 && r.sz >= 4) {
                     z7_BranchConv_ARM64_Enc(filtered.data() + r.off, static_cast<SizeT>(r.sz), 0);
                 } else if (r.arch == 2 && r.sz >= 16) {
@@ -1272,14 +1307,17 @@ inline ByteVec macho_lrm_lzma2_decompress(const uint8_t* src, size_t len) {
         throw std::runtime_error("Invalid PMCH header truncated");
     }
     ByteVec out = lzma_auto_decompress(src + hdr_sz, len - hdr_sz);
-    for (uint32_t i = 0; i < n_sec; ++i) {
+    std::atomic<bool> sec_oob{false};
+    #pragma omp parallel for schedule(dynamic, 1) if(n_sec >= 4)
+    for (int i = 0; i < static_cast<int>(n_sec); ++i) {
         size_t rec = 8 + static_cast<size_t>(i) * 17;
         uint64_t off = 0, sz = 0;
         std::memcpy(&off, src + rec, 8);
         std::memcpy(&sz, src + rec + 8, 8);
         uint8_t arch = src[rec + 16];
         if (off + sz > out.size()) {
-            throw std::runtime_error("Invalid PMCH section range");
+            sec_oob.store(true, std::memory_order_relaxed);
+            continue;
         }
         if (arch == 1 && sz >= 4) {
             z7_BranchConv_ARM64_Dec(out.data() + off, static_cast<SizeT>(sz), 0);
@@ -1287,6 +1325,9 @@ inline ByteVec macho_lrm_lzma2_decompress(const uint8_t* src, size_t len) {
             UInt32 st = Z7_BRANCH_CONV_ST_X86_STATE_INIT_VAL;
             z7_BranchConvSt_X86_Dec(out.data() + off, static_cast<SizeT>(sz), 0, &st);
         }
+    }
+    if (sec_oob.load(std::memory_order_relaxed)) {
+        throw std::runtime_error("Invalid PMCH section range");
     }
     return out;
 }
@@ -1302,10 +1343,24 @@ inline ByteVec lrm_lzma2_decompress(const uint8_t* src, size_t len) {
     if (16ULL + tok_sz + 8ULL > len) {
         throw std::runtime_error("Invalid PLRM container truncated");
     }
-    ByteVec tokens = bsc_parallel_decompress(src + 16, tok_sz);
     uint64_t lit_orig = 0;
     std::memcpy(&lit_orig, src + 16 + tok_sz, 8);
-    ByteVec literals = lzma_auto_decompress(src + 24 + tok_sz, len - 24 - tok_sz);
+    ByteVec tokens, literals;
+    if (tok_sz >= 65536) {
+        std::exception_ptr tok_err;
+        std::thread tok_thr([&]() {
+            g_tl_decode_threads = 1;
+            try { tokens = bsc_parallel_decompress(src + 16, tok_sz); }
+            catch (...) { tok_err = std::current_exception(); }
+            g_tl_decode_threads = 0;
+        });
+        literals = lzma_auto_decompress(src + 24 + tok_sz, len - 24 - tok_sz);
+        tok_thr.join();
+        if (tok_err) std::rethrow_exception(tok_err);
+    } else {
+        tokens = bsc_parallel_decompress(src + 16, tok_sz);
+        literals = lzma_auto_decompress(src + 24 + tok_sz, len - 24 - tok_sz);
+    }
     if (literals.size() != lit_orig) {
         throw std::runtime_error("PLRM literal size mismatch");
     }
@@ -1420,15 +1475,24 @@ inline ByteVec exec_x86_compress(const uint8_t* src, size_t len, int dict_mb = 4
     double main_scale = (out_main_len > 0)
         ? (prog_scale * static_cast<double>(len) / static_cast<double>(out_main_len))
         : prog_scale;
-    ByteVec c_main = g_fast_mode
-        ? lzma_parallel_compress(buf_main.get(), out_main_len, 8, 64, 16, (out_main_len > 2 * 1024 * 1024 ? 4 : 2), 3, 0, 2, 5, main_scale)
-        : lrm_lzma2_compress(buf_main.get(), out_main_len, 16, 64, 24, 3, 0, 2, 6, main_scale);
-    ByteVec c_call, c_jump, c_rc;
+    ByteVec c_main, c_call, c_jump, c_rc;
     {
-        SuppressProgress sp;
-        c_call = bsc_parallel_compress(buf_call.get(), out_call_len, 3, 0, 0, 1);
-        c_jump = bsc_parallel_compress(buf_jump.get(), out_jump_len, 3, 0, 0, 1);
-        c_rc   = bsc_parallel_compress(buf_rc.get(), out_rc_len, 3, 0, 0, 1);
+        std::exception_ptr aux_err;
+        std::thread aux_thr([&]() {
+            try {
+                SuppressProgress sp;
+                c_call = bsc_parallel_compress(buf_call.get(), out_call_len, 3, 0, 0, 1);
+                c_jump = bsc_parallel_compress(buf_jump.get(), out_jump_len, 3, 0, 0, 1);
+                c_rc   = bsc_parallel_compress(buf_rc.get(), out_rc_len, 3, 0, 0, 1);
+            } catch (...) {
+                aux_err = std::current_exception();
+            }
+        });
+        c_main = g_fast_mode
+            ? lzma_parallel_compress(buf_main.get(), out_main_len, 8, 64, 16, (out_main_len > 2 * 1024 * 1024 ? 4 : 2), 3, 0, 2, 5, main_scale)
+            : lrm_lzma2_compress(buf_main.get(), out_main_len, 16, 64, 24, 3, 0, 2, 6, main_scale);
+        aux_thr.join();
+        if (aux_err) std::rethrow_exception(aux_err);
     }
 
     size_t header_size = 4 + 8 + 16;
@@ -1471,22 +1535,24 @@ inline ByteVec exec_x86_decompress(const uint8_t* src, size_t len) {
     if (header_size + szs[0] + szs[1] + szs[2] + szs[3] > len) throw std::runtime_error("Invalid X86 container truncated");
 
     const uint8_t* ptr = src + header_size;
-    ByteVec main_buf = lzma_auto_decompress(ptr, szs[0]); ptr += szs[0];
-    ByteVec call_buf, jump_buf, rc_buf;
-    if (!omp_in_parallel()) {
-        #pragma omp parallel sections
-        {
-            #pragma omp section
-            { call_buf = bsc_parallel_decompress(ptr, szs[1]); }
-            #pragma omp section
-            { jump_buf = bsc_parallel_decompress(ptr + szs[1], szs[2]); }
-            #pragma omp section
-            { rc_buf   = bsc_parallel_decompress(ptr + szs[1] + szs[2], szs[3]); }
-        }
-    } else {
-        call_buf = bsc_parallel_decompress(ptr, szs[1]);
-        jump_buf = bsc_parallel_decompress(ptr + szs[1], szs[2]);
-        rc_buf   = bsc_parallel_decompress(ptr + szs[1] + szs[2], szs[3]);
+    ByteVec main_buf, call_buf, jump_buf, rc_buf;
+    {
+        const uint8_t* aux_ptr = ptr + szs[0];
+        std::exception_ptr aux_err;
+        std::thread aux_thr([&]() {
+            g_tl_decode_threads = 1;
+            try {
+                call_buf = bsc_parallel_decompress(aux_ptr, szs[1]);
+                jump_buf = bsc_parallel_decompress(aux_ptr + szs[1], szs[2]);
+                rc_buf   = bsc_parallel_decompress(aux_ptr + szs[1] + szs[2], szs[3]);
+            } catch (...) {
+                aux_err = std::current_exception();
+            }
+            g_tl_decode_threads = 0;
+        });
+        main_buf = lzma_auto_decompress(ptr, szs[0]);
+        aux_thr.join();
+        if (aux_err) std::rethrow_exception(aux_err);
     }
 
     ByteVec out(orig_size);
